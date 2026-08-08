@@ -5,7 +5,7 @@ import com.vurnindustrys.vurn.model.Quote
 import com.vurnindustrys.vurn.model.StockPick
 import kotlinx.coroutines.delay
 
-class Scanner(private val client: FinnhubClient) {
+class Scanner(private val client: VurnDataClient) {
     private val universe = listOf(
         "ACHR","ADTX","AMTX","ATER","ATOS","BBAI","BITF","BLNK","CLOV","CENN",
         "DNN","EVGO","FFIE","GFAI","HIVE","HUT","KULR","LUMN","MVIS","NNDM",
@@ -19,13 +19,13 @@ class Scanner(private val client: FinnhubClient) {
                 if (q.c in 0.20..5.00 && q.pc > 0.0) candidates += symbol to q
             }
             onProgress(index + 1, universe.size)
-            delay(1050)
+            delay(120)
         }
         val preRanked = candidates.sortedByDescending { (_, q) -> preliminaryScore(q) }.take(14)
         return preRanked.mapIndexed { index, (symbol, quote) ->
             val news = runCatching { client.news(symbol) }.getOrDefault(emptyList())
             onProgress(universe.size + index + 1, universe.size + preRanked.size)
-            delay(1050)
+            delay(120)
             score(symbol, quote, news)
         }.sortedByDescending { it.score }.take(10)
     }
@@ -44,11 +44,27 @@ class Scanner(private val client: FinnhubClient) {
         val sent = news.take(8).sumOf { sentiment(it.headline + " " + it.summary) }
         var raw = 48.0 + q.dp.coerceIn(-12.0, 12.0) * 1.45 + (pos - .5) * 18.0 + gap.coerceIn(-8.0, 8.0) * .8 + sent.coerceIn(-8, 8) * 2.2
         if (q.c < .50) raw -= 8.0
-        if ((q.h - q.l) / q.c > .35) raw -= 5.0
+        if (q.c > 0 && (q.h - q.l) / q.c > .35) raw -= 5.0
         val final = raw.toInt().coerceIn(5, 95)
-        val catalysts = news.asSequence().filter { sentiment(it.headline + " " + it.summary) > 0 }.map { it.headline }.filter { it.isNotBlank() }.distinct().take(2).toList()
-        val thesis = (if (q.dp > 0) "Positive momentum" else "Contrarian setup") + if (sent > 0) " with supportive recent headlines." else " with limited news support."
-        return StockPick(symbol, q.c, q.dp, final, if (final >= 78) "High" else if (final >= 63) "Medium" else "Speculative", thesis, catalysts.ifEmpty { listOf("No strong positive catalyst detected") }, if (q.c < .50) "Extreme micro-price volatility" else "High-risk penny stock")
+        val catalysts = news.asSequence()
+            .filter { sentiment(it.headline + " " + it.summary) > 0 }
+            .map { it.headline }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(2)
+            .toList()
+        val thesis = (if (q.dp > 0) "Positive recent momentum" else "Contrarian setup") +
+            if (sent > 0) " with supportive headlines in the last week." else " with limited positive headline support."
+        return StockPick(
+            symbol,
+            q.c,
+            q.dp,
+            final,
+            if (final >= 78) "High" else if (final >= 63) "Medium" else "Speculative",
+            thesis,
+            catalysts.ifEmpty { listOf("No strong positive catalyst detected in the public headline feed") },
+            if (q.c < .50) "Extreme micro-price volatility" else "High-risk penny stock"
+        )
     }
 
     private fun sentiment(text: String): Int {
