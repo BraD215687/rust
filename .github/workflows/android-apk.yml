@@ -3,7 +3,7 @@ name: Build Vurn APK
 on:
   workflow_dispatch:
   push:
-    branches: [ vurn-industrys ]
+    branches: [ main, vurn-industrys ]
   pull_request:
     branches: [ main ]
 
